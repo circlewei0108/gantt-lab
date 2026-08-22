@@ -6,6 +6,7 @@
 
 - 建立與管理多個專案
 - 同一瀏覽器內自動儲存，不強迫登入
+- 每位使用者可連結自己的 Google Drive 備份與載入
 - 拖曳調整任務順序
 - 編輯任務名稱、負責人、開始日、結束日與進度
 - 日、週、月、季時間軸與縮放
@@ -39,9 +40,20 @@ https://你的GitHub帳號.github.io/gantt-lab/
 
 之後每次更新 GitHub 的 `main` 分支，GitHub Pages 都會自動重新發布。
 
+## 啟用 Google Drive
+
+1. 到 Google Cloud Console 建立專案並啟用 **Google Drive API**。
+2. 設定 OAuth 同意畫面，再建立「網頁應用程式」OAuth 用戶端。
+3. 在「已授權的 JavaScript 來源」加入 `https://circlewei0108.github.io`。
+4. 到 GitHub Repository 的 **Settings → Secrets and variables → Actions → Variables**。
+5. 新增 Repository variable：名稱填 `GOOGLE_CLIENT_ID`，值貼上 Google 提供的 Client ID。
+6. 回到 **Actions**，重新執行 `Deploy to GitHub Pages`。
+
+網站只要求 `drive.file` 權限，只能管理由這個網站建立的備份檔案，不能任意讀取使用者的其他 Drive 檔案。
+
 ## 儲存方式
 
-目前專案資料儲存在瀏覽器的 Local Storage。同一裝置與瀏覽器重新開啟後仍會保留，但清除瀏覽器資料、使用無痕模式或更換裝置時不會同步。Google Drive 跨裝置同步介面已預留，正式啟用仍需設定 Google OAuth 與 Drive API。
+未連結 Google 時，專案資料會儲存在瀏覽器的 Local Storage。同一裝置與瀏覽器重新開啟後仍會保留，但清除瀏覽器資料、使用無痕模式或更換裝置時不會同步。完成上方設定後，每位使用者都可把專案備份到自己的 Google Drive。
 
 ## 自訂網址
 
