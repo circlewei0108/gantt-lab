@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { strFromU8, strToU8, unzlibSync, zipSync, zlibSync } from "fflate";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { strToU8, zipSync } from "fflate";
+import { addCalendarDays, dateInput, excelDateSerial } from "../lib/date-utils";
+import { createProjectFile, parseProjectFile, selectProjectsForExport, updateProjectSnapshot, type ProjectFileBarStyle, type ProjectFileProject, type ProjectFileTask } from "../lib/project-file";
 
-type BarStyle = "solid" | "outline" | "stripe" | "soft";
-type Task = { id: number; name: string; owner: string; start: string; end: string; progress: number; color: string; barStyle: BarStyle; milestone?: boolean };
-type Project = { id: string; name: string; category: string; updated: string; progress: number; tasks: Task[] };
+type BarStyle = ProjectFileBarStyle;
+type Task = ProjectFileTask;
+type Project = ProjectFileProject;
 const day = 86400000;
 const seedProjects: Project[] = [];
 const today = () => new Date();
@@ -20,15 +22,12 @@ function formatTick(date: Date, scale: "日" | "週" | "月" | "季") {
   if (scale === "季") return `${date.getFullYear()} Q${Math.floor(date.getMonth() / 3) + 1}`;
   return formatDate(date);
 }
-function dateInput(date: Date) { return date.toISOString().slice(0, 10); }
 function xml(value: string | number) { return String(value).replace(/[<>&"']/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[char] ?? char); }
 function columnName(index: number) { let name = ""; let value = index; while (value > 0) { value -= 1; name = String.fromCharCode(65 + value % 26) + name; value = Math.floor(value / 26); } return name; }
-function excelSerial(value: string) { return Math.floor((parseDate(value).getTime() - Date.UTC(1899, 11, 30)) / day); }
 function lightenHex(value: string, ratio = .72) { const raw = value.replace("#", "").padEnd(6, "0"); return `#${[0, 2, 4].map((index) => { const channel = Number.parseInt(raw.slice(index, index + 2), 16); return Math.round(channel + (255 - channel) * ratio).toString(16).padStart(2, "0"); }).join("")}`; }
-function bytesToBase64Url(bytes: Uint8Array) { let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""); }
-function base64UrlToBytes(value: string) { const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - value.length % 4) % 4); const binary = atob(padded); return Uint8Array.from(binary, (char) => char.charCodeAt(0)); }
-function encodeSharedProject(name: string, tasks: Task[]) { return bytesToBase64Url(zlibSync(strToU8(JSON.stringify({ name, tasks })), { level: 9 })); }
-function decodeSharedProject(value: string) { return JSON.parse(strFromU8(unzlibSync(base64UrlToBytes(value)))) as { name?: string; tasks?: Task[] }; }
+function safeFileName(value: string) { return (value.trim() || "未命名專案").replace(/[\\/:*?"<>|]/g, "-").slice(0, 80); }
+function triggerDownload(blob: Blob, fileName: string) { const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = fileName; anchor.style.display = "none"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
+function downloadProjectFile(projects: Project[], fileName: string) { triggerDownload(new Blob([createProjectFile(projects)], { type: "application/json;charset=utf-8" }), `${safeFileName(fileName)}.gantt.json`); }
 
 function downloadXlsx(tasks: Task[], projectName: string) {
   const starts = tasks.map((task) => parseDate(task.start).getTime());
@@ -40,8 +39,8 @@ function downloadXlsx(tasks: Task[], projectName: string) {
   const cells = (row: number, values: { value: string | number; style?: number; type?: "s" | "n"; formula?: string }[]) => `<row r="${row}" ht="22">${values.map((item, index) => { const ref = `${columnName(index + 1)}${row}`; if (item.formula) return `<c r="${ref}" s="${item.style ?? 0}"><f>${item.formula}</f></c>`; return item.type === "n" ? `<c r="${ref}" s="${item.style ?? 0}"><v>${item.value}</v></c>` : `<c r="${ref}" s="${item.style ?? 0}" t="inlineStr"><is><t>${xml(item.value)}</t></is></c>`; }).join("")}</row>`;
   const title = cells(1, [{ value: `${projectName || "未命名專案"}｜甘特圖`, style: 4 }]);
   const note = cells(2, [{ value: "修改開始日、結束日或進度百分比後，右側 Bar 會自動更新；深色為已完成，淺色為尚未完成。", style: 5 }]);
-  const header = cells(3, [{ value: "任務", style: 2 }, { value: "負責人", style: 2 }, { value: "開始日", style: 2 }, { value: "結束日", style: 2 }, { value: "進度", style: 2 }, ...dates.map((date) => ({ value: Math.floor((date.getTime() - Date.UTC(1899, 11, 30)) / day), style: 3, type: "n" as const }))]);
-  const rows = tasks.map((task, taskIndex) => { const row = taskIndex + 4; return cells(row, [{ value: task.name, style: 1 }, { value: task.owner, style: 1 }, { value: excelSerial(task.start), style: 3, type: "n" }, { value: excelSerial(task.end), style: 3, type: "n" }, { value: task.progress / 100, style: 6, type: "n" }, ...dates.map((_, dateIndex) => ({ value: "", style: 7, formula: `IF(AND(${columnName(dateIndex + 6)}$3&gt;=$C${row},${columnName(dateIndex + 6)}$3&lt;=$D${row}),1,\"\")` }))]); }).join("");
+  const header = cells(3, [{ value: "任務", style: 2 }, { value: "負責人", style: 2 }, { value: "開始日", style: 2 }, { value: "結束日", style: 2 }, { value: "進度", style: 2 }, ...dates.map((date) => ({ value: excelDateSerial(dateInput(date)), style: 3, type: "n" as const }))]);
+  const rows = tasks.map((task, taskIndex) => { const row = taskIndex + 4; return cells(row, [{ value: task.name, style: 1 }, { value: task.owner, style: 1 }, { value: excelDateSerial(task.start), style: 3, type: "n" }, { value: excelDateSerial(task.end), style: 3, type: "n" }, { value: task.progress / 100, style: 6, type: "n" }, ...dates.map((_, dateIndex) => ({ value: "", style: 7, formula: `IF(AND(${columnName(dateIndex + 6)}$3&gt;=$C${row},${columnName(dateIndex + 6)}$3&lt;=$D${row}),1,\"\")` }))]); }).join("");
   const endColumn = columnName(dates.length + 5);
   const conditional = tasks.map((_, index) => { const row = index + 4; const completedPriority = index * 2 + 1; const remainingPriority = completedPriority + 1; return `<conditionalFormatting sqref="F${row}:${endColumn}${row}"><cfRule type="expression" dxfId="${index * 2}" priority="${completedPriority}" stopIfTrue="1"><formula>AND(F$3&gt;=$C${row},F$3&lt;=$D${row},$E${row}&gt;0,F$3&lt;=$C${row}+ROUNDUP(($D${row}-$C${row}+1)*$E${row},0)-1)</formula></cfRule><cfRule type="expression" dxfId="${index * 2 + 1}" priority="${remainingPriority}"><formula>AND(F$3&gt;=$C${row},F$3&lt;=$D${row})</formula></cfRule></conditionalFormatting>`; }).join("");
   const progressValidation = tasks.length ? `<dataValidations count="1"><dataValidation type="decimal" operator="between" allowBlank="0" showErrorMessage="1" errorTitle="請輸入百分比" error="請輸入 0% 到 100% 之間的數值。" sqref="E4:E${tasks.length + 3}"><formula1>0</formula1><formula2>1</formula2></dataValidation></dataValidations>` : "";
@@ -55,7 +54,7 @@ function downloadXlsx(tasks: Task[], projectName: string) {
     "xl/worksheets/sheet1.xml": strToU8(sheet), "xl/styles.xml": strToU8(styles),
   };
   const blob = new Blob([zipSync(files) as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${projectName || "未命名專案"}.xlsx`; anchor.click(); URL.revokeObjectURL(url);
+  triggerDownload(blob, `${projectName || "未命名專案"}.xlsx`);
 }
 
 function buildImageSvg(tasks: Task[], projectName: string) {
@@ -78,7 +77,7 @@ function buildImageSvg(tasks: Task[], projectName: string) {
 function downloadImage(tasks: Task[], projectName: string, format: "png" | "jpeg") {
   const svg = buildImageSvg(tasks, projectName); const width = 1600; const height = 230 + tasks.length * 66;
   const image = new Image(); const svgUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-  image.onload = () => { const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height; const context = canvas.getContext("2d"); if (!context) return; context.fillStyle = "#fafaf8"; context.fillRect(0, 0, width, height); context.drawImage(image, 0, 0); canvas.toBlob((blob) => { if (!blob) return; const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${projectName}.${format === "jpeg" ? "jpg" : "png"}`; anchor.click(); URL.revokeObjectURL(url); URL.revokeObjectURL(svgUrl); }, `image/${format}`, .94); };
+  image.onload = () => { const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height; const context = canvas.getContext("2d"); if (!context) return; context.fillStyle = "#fafaf8"; context.fillRect(0, 0, width, height); context.drawImage(image, 0, 0); canvas.toBlob((blob) => { if (!blob) return; triggerDownload(blob, `${projectName}.${format === "jpeg" ? "jpg" : "png"}`); URL.revokeObjectURL(svgUrl); }, `image/${format}`, .94); };
   image.src = svgUrl;
 }
 
@@ -89,39 +88,27 @@ export default function Home() {
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [showExcel, setShowExcel] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
-  const [showShare, setShowShare] = useState(false);
-  const [shareLink, setShareLink] = useState("");
-  const [shareCopied, setShareCopied] = useState(false);
+  const [showProjectExport, setShowProjectExport] = useState(false);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [screen, setScreen] = useState<"projects" | "editor">("projects");
   const [projects, setProjects] = useState<Project[]>(seedProjects);
   const [currentProjectId, setCurrentProjectId] = useState("");
   const [storageReady, setStorageReady] = useState(false);
+  const [fileMessage, setFileMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("gantt-lab-projects-v2");
-      if (saved) { const parsed = JSON.parse(saved); if (Array.isArray(parsed)) setProjects(parsed); }
-    } catch { /* Start clean if browser storage is unavailable. */ }
-    setStorageReady(true);
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem("gantt-lab-projects-v2");
+        if (saved) { const parsed = JSON.parse(saved); if (Array.isArray(parsed)) setProjects(parsed); }
+      } catch { /* Start clean if browser storage is unavailable. */ }
+      setStorageReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
-  useEffect(() => {
-    if (!storageReady || (!window.location.hash.startsWith("#p=") && !window.location.hash.startsWith("#project="))) return;
-    try {
-      const shared = window.location.hash.startsWith("#p=") ? decodeSharedProject(window.location.hash.slice(3)) : JSON.parse(decodeURIComponent(window.location.hash.slice(9))) as { name?: string; tasks?: Task[] };
-      if (!Array.isArray(shared.tasks) || !shared.tasks.length) return;
-      const id = `shared-${Date.now()}`;
-      const imported: Project = { id, name: shared.name || "分享的專案", category: "分享專案", updated: "剛剛匯入", progress: Math.round(shared.tasks.reduce((sum, task) => sum + Number(task.progress || 0), 0) / shared.tasks.length), tasks: shared.tasks.map((task, index) => ({ ...task, id: Date.now() + index })) };
-      setProjects((current) => [...current, imported]); setCurrentProjectId(id); setProjectName(imported.name); setTasks(imported.tasks); setScreen("editor");
-      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-    } catch { /* Ignore invalid share links. */ }
-  }, [storageReady]);
   useEffect(() => {
     if (!storageReady) return;
     try { localStorage.setItem("gantt-lab-projects-v2", JSON.stringify(projects)); } catch { /* Private browsing may block storage. */ }
   }, [projects, storageReady]);
-  useEffect(() => {
-    if (!storageReady || screen !== "editor") return;
-    setProjects((current) => current.map((project) => project.id === currentProjectId ? { ...project, name: projectName, tasks: tasks.map((task) => ({ ...task })), progress: Math.round(tasks.reduce((sum, task) => sum + task.progress, 0) / Math.max(1, tasks.length)), updated: "剛剛更新" } : project));
-  }, [tasks, projectName, currentProjectId, screen, storageReady]);
   const range = useMemo(() => {
     const starts = tasks.map((task) => parseDate(task.start).getTime());
     const ends = tasks.map((task) => parseDate(task.end).getTime());
@@ -142,18 +129,18 @@ export default function Home() {
     }
     return result;
   }, [range, scale]);
-  const update = (id: number, key: keyof Task, value: string | number) => setTasks((current) => current.map((task) => task.id === id ? { ...task, [key]: value } : task));
+  const saveEditorSnapshot = (nextTasks: Task[], nextName = projectName) => { if (currentProjectId) setProjects((current) => updateProjectSnapshot(current, currentProjectId, nextName, nextTasks)); };
+  const update = (id: number, key: keyof Task, value: string | number) => { const next = tasks.map((task) => task.id === id ? { ...task, [key]: value } : task); setTasks(next); saveEditorSnapshot(next); };
+  const updateProjectName = (value: string) => { setProjectName(value); saveEditorSnapshot(tasks, value); };
   const moveTask = (targetId: number) => {
     if (!draggedId || draggedId === targetId) return;
-    setTasks((current) => {
-      const next = [...current]; const from = next.findIndex((item) => item.id === draggedId); const to = next.findIndex((item) => item.id === targetId);
-      const [moved] = next.splice(from, 1); next.splice(to, 0, moved); return next;
-    });
+    const next = [...tasks]; const from = next.findIndex((item) => item.id === draggedId); const to = next.findIndex((item) => item.id === targetId);
+    const [moved] = next.splice(from, 1); next.splice(to, 0, moved); setTasks(next); saveEditorSnapshot(next);
   };
   const addTask = () => {
-    const last = tasks[tasks.length - 1]; const start = last ? parseDate(last.end) : new Date(); start.setDate(start.getDate() + 1);
-    const end = new Date(start); end.setDate(end.getDate() + 6);
-    setTasks([...tasks, { id: Date.now(), name: "", owner: "", start: dateInput(start), end: dateInput(end), progress: 0, color: "#ff3b30", barStyle: "solid" }]);
+    const last = tasks[tasks.length - 1]; const start = last ? addCalendarDays(last.end, 1) : dateInput(new Date()); const end = addCalendarDays(start, 6);
+    const next = [...tasks, { id: Date.now(), name: "", owner: "", start, end, progress: 0, color: "#ff3b30", barStyle: "solid" } satisfies Task];
+    setTasks(next); saveEditorSnapshot(next);
   };
   const openProject = (project: Project) => {
     setCurrentProjectId(project.id);
@@ -163,20 +150,41 @@ export default function Home() {
   };
   const createProject = () => { const id = `project-${Date.now()}`; const newTasks = [blankTask()]; const project: Project = { id, name: "未命名專案", category: "自訂專案", updated: "剛剛建立", progress: 0, tasks: newTasks }; setProjects((current) => [...current, project]); setCurrentProjectId(id); setProjectName(project.name); setTasks(newTasks); setScreen("editor"); };
   const deleteProject = (id: string, name: string) => { if (!window.confirm(`確定刪除「${name}」嗎？此操作無法復原。`)) return; setProjects((current) => current.filter((project) => project.id !== id)); };
-  const prepareShareLink = () => { const payload = encodeSharedProject(projectName, tasks); const link = `${window.location.origin}${window.location.pathname}#p=${payload}`; setShareLink(link); setShareCopied(false); setShowShare(true); };
-  const copyShareLink = async () => { try { await navigator.clipboard.writeText(shareLink); setShareCopied(true); } catch { setShareCopied(false); } };
+  const importProjectFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const imported = parseProjectFile(await file.text());
+      setProjects((current) => [...current, ...imported]);
+      setFileMessage({ type: "success", text: imported.length === 1 ? `已匯入「${imported[0].name}」` : `已匯入 ${imported.length} 個專案` });
+    } catch (error) {
+      setFileMessage({ type: "error", text: error instanceof Error ? error.message : "專案檔匯入失敗。" });
+    }
+  };
+  const openSelectiveExport = () => { setSelectedProjectIds([]); setShowProjectExport(true); };
+  const toggleProjectSelection = (id: string) => setSelectedProjectIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const allProjectsSelected = projects.length > 0 && selectedProjectIds.length === projects.length;
+  const toggleAllProjects = () => setSelectedProjectIds(allProjectsSelected ? [] : projects.map((project) => project.id));
+  const exportSelectedProjects = () => { const selected = selectProjectsForExport(projects, selectedProjectIds); downloadProjectFile(selected, selected.length === 1 ? selected[0].name : `gantt-lab-${selected.length}個專案-${dateInput(new Date())}`); setShowProjectExport(false); };
+  const exportCurrentProject = () => downloadProjectFile([{ id: currentProjectId || `project-${Date.now()}`, name: projectName, category: "自訂專案", updated: "匯出時版本", progress: Math.round(tasks.reduce((sum, task) => sum + task.progress, 0) / Math.max(1, tasks.length)), tasks: tasks.map((task) => ({ ...task })) }], projectName);
   if (screen === "projects") return <main>
     <header className="topbar"><div className="brand"><span>gantt</span><b>!</b><span>lab</span></div></header>
-    <section className="project-hub"><div className="hub-head"><div><small>PROJECTS</small><h1>我的專案</h1></div><button className="new-project" onClick={createProject}>＋ 新增專案</button></div>{projects.length === 0 ? <div className="empty-projects"><div>＋</div><h2>還沒有專案</h2><p>建立第一個空白專案，從你的任務開始。</p><button onClick={createProject}>建立第一個專案</button></div> : <div className="project-grid">{projects.map((project, index) => <article className="project-card" key={project.id}><button className="project-open" onClick={() => openProject(project)}><div className="project-card-top"><span>{String(index + 1).padStart(2, "0")}</span><i>↗</i></div><div><em>{project.category}</em><h2>{project.name}</h2></div><div className="project-progress"><span><i style={{ width: `${project.progress}%` }}/></span><b>{project.progress}%</b></div><footer><span>{project.tasks.length} 個任務</span><span>{project.updated}</span></footer></button><button className="delete-project" onClick={() => deleteProject(project.id, project.name)}>刪除專案</button></article>)}</div>}</section>
+    <section className="project-hub">
+      <div className="hub-head"><div><small>PROJECTS</small><h1>我的專案</h1><p>可自動儲存，也能用專案檔備份或移到其他裝置。</p></div><div className="hub-actions"><label className="import-project">↓ 匯入專案檔<input type="file" accept=".json,application/json" onChange={importProjectFile}/></label><button className="backup-projects" onClick={openSelectiveExport} disabled={!projects.length}>↑ 選擇匯出</button><button className="new-project" onClick={createProject}>＋ 新增專案</button></div></div>
+      {fileMessage && <div className={`file-message ${fileMessage.type}`} role="status"><span>{fileMessage.type === "success" ? "✓" : "!"}</span>{fileMessage.text}<button onClick={() => setFileMessage(null)} aria-label="關閉訊息">×</button></div>}
+      {projects.length === 0 ? <div className="empty-projects"><div>＋</div><h2>還沒有專案</h2><p>建立空白專案，或匯入先前下載的專案檔。</p><button onClick={createProject}>建立第一個專案</button></div> : <div className="project-grid">{projects.map((project, index) => <article className="project-card" key={project.id}><button className="project-open" onClick={() => openProject(project)}><div className="project-card-top"><span>{String(index + 1).padStart(2, "0")}</span><i>↗</i></div><div><em>{project.category}</em><h2>{project.name}</h2></div><div className="project-progress"><span><i style={{ width: `${project.progress}%` }}/></span><b>{project.progress}%</b></div><footer><span>{project.tasks.length} 個任務</span><span>{project.updated}</span></footer></button><button className="delete-project" onClick={() => deleteProject(project.id, project.name)}>刪除專案</button></article>)}</div>}
+    </section>
+    {showProjectExport && <div className="modal-backdrop" onMouseDown={() => setShowProjectExport(false)}><section className="project-export-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="選擇匯出專案"><header><div><small>PROJECT FILE</small><h2>選擇要匯出的專案</h2><p>可勾選一個或多個專案，下載成同一個專案檔。</p></div><button onClick={() => setShowProjectExport(false)} aria-label="關閉選擇匯出">×</button></header><div className="export-select-tools"><button onClick={toggleAllProjects}>{allProjectsSelected ? "取消全選" : "全選"}</button><span>已選擇 <b>{selectedProjectIds.length}</b>／{projects.length} 個</span></div><div className="export-project-list">{projects.map((project) => <label className={selectedProjectIds.includes(project.id) ? "selected" : ""} key={project.id}><input type="checkbox" checked={selectedProjectIds.includes(project.id)} onChange={() => toggleProjectSelection(project.id)}/><span><b>{project.name}</b><small>{project.tasks.length} 個任務 · {project.updated}</small></span><em>{project.progress}%</em></label>)}</div><footer><button className="secondary" onClick={() => setShowProjectExport(false)}>取消</button><button className="primary" disabled={!selectedProjectIds.length} onClick={exportSelectedProjects}>下載 {selectedProjectIds.length ? `${selectedProjectIds.length} 個` : "所選"}專案</button></footer></section></div>}
   </main>;
   return <main>
     <header className="topbar">
       <div className="brand-row"><button className="back-projects" onClick={() => setScreen("projects")}>←</button><div className="brand"><span>gantt</span><b>!</b><span>lab</span></div></div>
-      <div className="top-actions"><button className="share-button" onClick={prepareShareLink}>分享專案</button><button className="preview-button" onClick={() => setShowImagePreview(true)}>預覽圖片</button><button className="preview-button" onClick={() => setShowExcel(true)}>預覽 Excel</button><details className="export-menu"><summary>匯出 <span>↗</span></summary><div><button onClick={() => downloadImage(tasks, projectName, "png")}><b>PNG</b><span>透明度清晰，適合簡報</span></button><button onClick={() => downloadImage(tasks, projectName, "jpeg")}><b>JPG</b><span>檔案較小，方便分享</span></button><button onClick={() => downloadXlsx(tasks, projectName)}><b>Excel</b><span>可繼續修改日期與任務</span></button></div></details></div>
+      <div className="top-actions"><button className="preview-button" onClick={() => setShowImagePreview(true)}>預覽圖片</button><button className="preview-button" onClick={() => setShowExcel(true)}>預覽 Excel</button><details className="export-menu"><summary>匯出 <span>↗</span></summary><div><button onClick={exportCurrentProject}><b>專案檔</b><span>完整備份，之後可再匯入</span></button><button onClick={() => downloadImage(tasks, projectName, "png")}><b>PNG</b><span>透明度清晰，適合簡報</span></button><button onClick={() => downloadImage(tasks, projectName, "jpeg")}><b>JPG</b><span>檔案較小，方便分享</span></button><button onClick={() => downloadXlsx(tasks, projectName)}><b>Excel</b><span>可繼續修改日期與任務</span></button></div></details></div>
     </header>
     <section className="app-shell">
       <div className="toolbar">
-        <div className="project-title"><span className="live-dot"/><input value={projectName} onChange={(event) => setProjectName(event.target.value)} aria-label="專案名稱"/><small>已儲存</small></div>
+        <div className="project-title"><span className="live-dot"/><input value={projectName} onChange={(event) => updateProjectName(event.target.value)} aria-label="專案名稱"/><small>已儲存</small></div>
         <div className="toolbar-actions"><span>檢視</span><div className="segmented">{(["日","週","月","季"] as const).map((item) => <button key={item} className={scale === item ? "active" : ""} onClick={() => setScale(item)}>{item}</button>)}</div><div className="zoom-control"><button onClick={() => setScale(scaleLevels[Math.max(0, scaleLevels.indexOf(scale) - 1)])} aria-label="縮小時間軸">−</button><input type="range" min="0" max="3" step="1" value={scaleLevels.indexOf(scale)} onChange={(event) => setScale(scaleLevels[Number(event.target.value)])} aria-label="時間軸縮放"/><button onClick={() => setScale(scaleLevels[Math.min(3, scaleLevels.indexOf(scale) + 1)])} aria-label="放大時間軸">＋</button></div></div>
       </div>
       <div className="workspace">
@@ -185,7 +193,7 @@ export default function Home() {
           <div className="task-list">{tasks.map((task, index) => <article className={`task-card ${draggedId === task.id ? "dragging" : ""}`} key={task.id} draggable onDragStart={() => setDraggedId(task.id)} onDragEnter={() => moveTask(task.id)} onDragOver={(event) => event.preventDefault()} onDragEnd={() => setDraggedId(null)}>
             <button className="drag-handle" aria-label={`拖曳任務 ${task.name}`} title="拖曳調整順序">⠿</button>
             <div className="task-fields"><div className="task-name-line"><span>{String(index + 1).padStart(2, "0")}</span><input className="task-name" value={task.name} placeholder="輸入任務名稱" onChange={(event) => update(task.id, "name", event.target.value)}/></div><div className="task-meta"><label>負責人<input value={task.owner} placeholder="輸入姓名" onChange={(event) => update(task.id, "owner", event.target.value)} aria-label="負責人"/></label><label>開始<input type="date" value={task.start} onChange={(event) => update(task.id, "start", event.target.value)} aria-label="開始日"/></label><span>—</span><label>結束<input type="date" value={task.end} onChange={(event) => update(task.id, "end", event.target.value)} aria-label="結束日"/></label></div><div className="bar-controls"><span>Bar</span><input className="color-input" type="color" value={task.color} onChange={(event) => update(task.id, "color", event.target.value)} aria-label="自訂 Bar 顏色" title="自訂顏色"/><div className="color-palette">{barPalette.map((color) => <button key={color} className={task.color.toLowerCase() === color ? "selected" : ""} style={{ background: color }} onClick={() => update(task.id, "color", color)} aria-label={`選擇色塊 ${color}`}/>)}</div><div className="style-options">{(["solid","outline","stripe","soft"] as BarStyle[]).map((style) => <button key={style} className={`${style} ${task.barStyle === style ? "selected" : ""}`} onClick={() => update(task.id, "barStyle", style)} aria-label={`選擇 ${style} 樣式`}><i style={{ "--swatch": task.color } as React.CSSProperties}/></button>)}</div><label className="progress-control">進度<input type="number" min="0" max="100" step="1" value={task.progress} onChange={(event) => update(task.id, "progress", Math.min(100, Math.max(0, Number(event.target.value))))}/><b>%</b></label></div></div>
-            <button className="delete" onClick={() => tasks.length > 1 && setTasks(tasks.filter((item) => item.id !== task.id))} aria-label="刪除任務">×</button>
+            <button className="delete" onClick={() => { if (tasks.length <= 1) return; const next = tasks.filter((item) => item.id !== task.id); setTasks(next); saveEditorSnapshot(next); }} aria-label="刪除任務">×</button>
           </article>)}</div>
           <button className="add-task" onClick={addTask}>＋ 新增任務</button>
         </aside>
@@ -201,7 +209,7 @@ export default function Home() {
       </div>
     </section>
     {showImagePreview && <div className="modal-backdrop" onMouseDown={() => setShowImagePreview(false)}><section className="image-preview-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="圖片匯出預覽"><header><div><strong>圖片匯出預覽</strong><small>進度、日期與 Bar 樣式會一併輸出</small></div><button onClick={() => setShowImagePreview(false)}>×</button></header><div className="image-preview-canvas" dangerouslySetInnerHTML={{ __html: buildImageSvg(tasks, projectName) }}/><footer><button onClick={() => downloadImage(tasks, projectName, "jpeg")}>下載 JPG</button><button className="primary" onClick={() => downloadImage(tasks, projectName, "png")}>下載 PNG</button></footer></section></div>}
-    {showShare && <div className="modal-backdrop" onMouseDown={() => setShowShare(false)}><section className="share-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="分享專案"><button className="modal-close" onClick={() => setShowShare(false)}>×</button><span className="share-icon">↗</span><h2>分享可編輯專案</h2><p>把連結傳給其他人，對方開啟後會取得一份可自由編輯的專案副本。</p><label>分享連結<textarea readOnly value={shareLink}/></label><button className="copy-share" onClick={copyShareLink}>{shareCopied ? "已複製連結" : "複製分享連結"}</button><small>目前彼此的修改不會即時同步。</small></section></div>}
     {showExcel && <div className="modal-backdrop" onMouseDown={() => setShowExcel(false)}><section className="excel-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Excel 匯出預覽"><header><div><span className="excel-icon">X</span><div><strong>{projectName || "未命名專案"}.xlsx</strong><small>動態公式預覽</small></div></div><button onClick={() => setShowExcel(false)}>×</button></header><div className="formula-bar"><span>fx</span><div>=AND(F$3&gt;=$C4,F$3&lt;=$D4,$E4&gt;0,F$3&lt;=$C4+ROUNDUP(($D4-$C4+1)*$E4,0)-1)</div></div><div className="excel-scroll"><div className="excel-sheet"><div className="excel-row excel-columns"><b></b>{["A","B","C","D","E","F","G","H","I","J","K","L"].map((letter) => <span key={letter}>{letter}</span>)}</div><div className="excel-row title-row"><b>1</b><strong>{projectName || "未命名專案"}｜甘特圖</strong></div><div className="excel-row sheet-header"><b>3</b><span>任務</span><span>負責人</span><span>開始日</span><span>結束日</span><span>進度</span>{excelWeeks.map((date) => <span key={date.toISOString()}>{formatDate(date)}</span>)}</div>{tasks.slice(0,6).map((task,index) => <div className="excel-row data-row" key={task.id}><b>{index + 4}</b><span>{task.name || "（未命名任務）"}</span><span>{task.owner || "—"}</span><span>{task.start.slice(5).replace("-","/")}</span><span>{task.end.slice(5).replace("-","/")}</span><span>{task.progress}%</span>{excelWeeks.map((week) => { const weekEnd = new Date(week.getTime() + 6 * day); const taskStart = parseDate(task.start); const taskEnd = parseDate(task.end); const active = taskStart <= weekEnd && taskEnd >= week; const duration = Math.max(1, Math.round((taskEnd.getTime() - taskStart.getTime()) / day) + 1); const completedThrough = new Date(taskStart.getTime() + Math.max(0, Math.ceil(duration * task.progress / 100) - 1) * day); const light = lightenHex(task.color); let background = light; if (completedThrough >= weekEnd) background = task.color; else if (completedThrough >= week) { const completedDays = Math.min(7, Math.max(0, Math.floor((completedThrough.getTime() - week.getTime()) / day) + 1)); background = `linear-gradient(90deg, ${task.color} 0 ${completedDays / 7 * 100}%, ${light} ${completedDays / 7 * 100}% 100%)`; } return <span className={`excel-week-cell ${active ? "active" : ""}`} style={active ? { background } : undefined} key={week.toISOString()}/>; })}</div>)}</div></div><footer><span className="sheet-tab">甘特圖</span><p><i/> 修改日期或進度百分比，Bar 會自動重算；深色為已完成，淺色為尚未完成</p><button onClick={() => { setShowExcel(false); downloadXlsx(tasks, projectName); }}>下載 Excel</button></footer></section></div>}
   </main>;
 }
+
