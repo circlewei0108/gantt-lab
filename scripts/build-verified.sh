@@ -4,7 +4,10 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ "${SITES_ENV_READY:-}" != "1" ]]; then
-  exec "${script_dir}/sites-env.sh" -- "$0" "$@"
+  # GitHub's web uploader can reset shell-script permissions to 0644 when a
+  # ZIP is extracted. Invoke both scripts through bash so the Pages build does
+  # not depend on the executable bit being preserved.
+  exec bash "${script_dir}/sites-env.sh" -- bash "$0" "$@"
 fi
 
 command -v timeout || {
