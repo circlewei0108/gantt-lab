@@ -1,56 +1,107 @@
-# gantt!lab
+# vinext-starter
 
-可直接編輯、預覽並匯出 Excel、PNG 與 JPG 的繁體中文甘特圖工作台。
+A clean full-stack starter running on
+[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
+Drizzle support.
 
-## 主要功能
+## Prerequisites
 
-- 建立與管理多個專案
-- 同一瀏覽器內自動儲存，不強迫登入
-- 刪除不需要的專案
-- 產生可編輯的專案分享連結
-- 拖曳調整任務順序
-- 編輯任務名稱、負責人、開始日、結束日與進度
-- 日、週、月、季時間軸與縮放
-- 自訂 Bar 顏色與四種顯示樣式
-- 預覽及匯出 Excel、PNG、JPG
+- Node.js `>=22.13.0`
+- Linux with `flock`, `curl`, and GNU `timeout`
 
-## 本機啟動
+## Sites Lifecycle
 
-請先安裝 Node.js 22，再於專案資料夾執行：
+The Sites lifecycle CLI runs the locked dependency install before returning this checkout. Edit the source under `app/`, then checkpoint when a coherent milestone is ready to inspect or share. The remote Sites builder runs `npm run build` against the pushed commit. Do not repeat install or build as a normal pre-checkpoint step.
 
-```bash
-npm install
-npm run dev
+This starter does not use `wrangler.jsonc`.
+
+`install:ci` is intentionally a single, non-retrying `npm ci`. It refuses a concurrent install for the same project, consumes a matching image-seeded npm cache with `--prefer-offline` while retaining registry fallback for a missing cache object, otherwise downloads and verifies the complete vinext tarball recorded in `package-lock.json`, limits npm to one socket, and terminates a stalled install. `build` applies a short timeout. These helpers target Linux and use GNU `timeout`; they are not native macOS scripts.
+
+Scripts that need writable project-scoped home, npm, XDG, and temporary paths use `scripts/sites-env.sh`. The `dev` and `start` scripts honor the caller's runtime environment and keep Wrangler logs inside the checkout. The generated `.sites-runtime/` directory is disposable and ignored by Git.
+
+## Included Shape
+
+- edit site code under `app/`
+- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
+- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
+- `vite.config.ts` simulates declared bindings for local development
+- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
+- `db/schema.ts` starts intentionally empty
+- `examples/d1/` contains an optional D1 example surface
+- `drizzle.config.ts` supports local migration generation when needed
+
+## Workspace Auth Headers
+
+OpenAI workspace sites can read the current user's email from
+`oai-authenticated-user-email`.
+
+SIWC-authenticated workspace sites may also receive
+`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
+`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
+`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+
+Treat the full name as optional and fall back to email when it is absent:
+
+```tsx
+import { headers } from "next/headers";
+
+export default async function Home() {
+  const requestHeaders = await headers();
+  const email = requestHeaders.get("oai-authenticated-user-email");
+  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
+  const fullName =
+    encodedFullName &&
+    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
+      "percent-encoded-utf-8"
+      ? decodeURIComponent(encodedFullName)
+      : null;
+
+  const displayName = fullName ?? email;
+  // ...
+}
 ```
 
-接著開啟 <http://localhost:3000>。
+## Optional Dispatch-Owned ChatGPT Sign-In
 
-## 發布到 GitHub Pages
+Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
+optional or required ChatGPT sign-in:
 
-1. 在 GitHub 建立新的 Repository，建議命名為 `gantt-lab`。
-2. 將這個資料夾內的所有檔案上傳至 Repository。
-3. 進入 Repository 的 **Settings → Pages**。
-4. 在 **Build and deployment → Source** 選擇 **GitHub Actions**。
-5. 回到 **Actions** 頁籤，等待 `Deploy to GitHub Pages` 顯示綠色勾勾。
+- Use `getChatGPTUser()` for optional signed-in UI.
+- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
+  anonymous visitors through Sign in with ChatGPT.
+- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
+  browser links or actions.
+- Pass a same-origin relative `returnTo` path for the destination after sign-in
+  or sign-out. The helper validates and safely encodes it.
+- Mark protected pages with `export const dynamic = "force-dynamic"` because
+  they depend on per-request identity headers.
 
-完成後網址會是：
+Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
+OAuth cookies, and identity header injection. Do not implement app routes for
+those reserved paths. Routes that do not import and call the helper remain
+anonymous-compatible.
 
-```text
-https://你的GitHub帳號.github.io/gantt-lab/
-```
+SIWC establishes identity only; it does not prove workspace membership. Use the
+Sites hosting platform's access policy controls for workspace-wide restrictions,
+or enforce explicit server-side membership or allowlist checks.
 
-之後每次更新 GitHub 的 `main` 分支，GitHub Pages 都會自動重新發布。
+Use SIWC for account pages, user-specific dashboards, saved records, and write
+actions tied to the current ChatGPT user. Leave public content anonymous.
 
-## 儲存方式
+## Diagnostic Commands
 
-專案資料會儲存在瀏覽器的 Local Storage。同一裝置與瀏覽器重新開啟後仍會保留，但清除瀏覽器資料、使用無痕模式或更換裝置時不會同步。
+- `npm run install:ci`: perform the one bounded lockfile install
+- `npm run dev`: start the Vite/Vinext development server
+- `npm run build`: build the deployable Sites artifact
+- `npm run start`: start the built Vinext application
+- `npm test`: build and verify the rendered development-preview metadata
+- `npm run db:generate`: generate Drizzle migrations after schema changes
 
-分享連結會把目前專案內容放在網址中。收到連結的人可以建立及編輯自己的專案副本，但不同使用者之間的修改不會即時同步。
+Use build commands for targeted diagnosis after a remote failure, not as part of the normal checkpoint path.
 
-## 自訂網址
+The timeout defaults can be overridden for a controlled canary with `SITES_INSTALL_TIMEOUT`, `SITES_INSTALL_KILL_AFTER`, `SITES_BUILD_TIMEOUT`, and `SITES_BUILD_KILL_AFTER`. A timeout fails the command; the helpers never retry an unchanged install or build.
 
-GitHub Actions 會自動判斷 Repository 名稱，不需要手動設定。若未來改用其他平台或自訂網域，可設定：
+## Learn More
 
-```text
-NEXT_PUBLIC_SITE_URL=https://你的網域
-```
+- [vinext Documentation](https://github.com/cloudflare/vinext)
+- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)

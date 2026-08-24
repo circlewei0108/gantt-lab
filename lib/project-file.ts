@@ -117,4 +117,3 @@ export function parseProjectFile(text: string, now = Date.now()): ProjectFilePro
     };
   });
 }
-

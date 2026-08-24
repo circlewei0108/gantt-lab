@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { strToU8, zipSync } from "fflate";
 import { addCalendarDays, dateInput, excelDateSerial } from "../lib/date-utils";
 import { createProjectFile, parseProjectFile, selectProjectsForExport, updateProjectSnapshot, type ProjectFileBarStyle, type ProjectFileProject, type ProjectFileTask } from "../lib/project-file";
@@ -44,7 +44,9 @@ function downloadXlsx(tasks: Task[], projectName: string) {
   const endColumn = columnName(dates.length + 5);
   const conditional = tasks.map((_, index) => { const row = index + 4; const completedPriority = index * 2 + 1; const remainingPriority = completedPriority + 1; return `<conditionalFormatting sqref="F${row}:${endColumn}${row}"><cfRule type="expression" dxfId="${index * 2}" priority="${completedPriority}" stopIfTrue="1"><formula>AND(F$3&gt;=$C${row},F$3&lt;=$D${row},$E${row}&gt;0,F$3&lt;=$C${row}+ROUNDUP(($D${row}-$C${row}+1)*$E${row},0)-1)</formula></cfRule><cfRule type="expression" dxfId="${index * 2 + 1}" priority="${remainingPriority}"><formula>AND(F$3&gt;=$C${row},F$3&lt;=$D${row})</formula></cfRule></conditionalFormatting>`; }).join("");
   const progressValidation = tasks.length ? `<dataValidations count="1"><dataValidation type="decimal" operator="between" allowBlank="0" showErrorMessage="1" errorTitle="請輸入百分比" error="請輸入 0% 到 100% 之間的數值。" sqref="E4:E${tasks.length + 3}"><formula1>0</formula1><formula2>1</formula2></dataValidation></dataValidations>` : "";
-  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane xSplit="5" ySplit="3" topLeftCell="F4" activePane="bottomRight" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="32" customWidth="1"/><col min="2" max="2" width="15" customWidth="1"/><col min="3" max="4" width="12" customWidth="1"/><col min="5" max="5" width="10" customWidth="1"/><col min="6" max="${dates.length + 5}" width="4" customWidth="1"/></cols><sheetData>${title}${note}${header}${rows}</sheetData><mergeCells count="2"><mergeCell ref="A1:E1"/><mergeCell ref="A2:E2"/></mergeCells>${conditional}${progressValidation}<pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+  // Date cells need enough room for the localized Excel date format; narrow
+  // columns render as ### even though the underlying serial value is correct.
+  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane xSplit="5" ySplit="3" topLeftCell="F4" activePane="bottomRight" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="32" customWidth="1"/><col min="2" max="2" width="15" customWidth="1"/><col min="3" max="4" width="14" customWidth="1"/><col min="5" max="5" width="10" customWidth="1"/><col min="6" max="${dates.length + 5}" width="11" customWidth="1"/></cols><sheetData>${title}${note}${header}${rows}</sheetData><mergeCells count="2"><mergeCell ref="A1:E1"/><mergeCell ref="A2:E2"/></mergeCells>${conditional}${progressValidation}<pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode=";;;"/></numFmts><fonts count="3"><font><sz val="10"/><name val="Microsoft JhengHei"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Microsoft JhengHei"/></font><font><b/><sz val="18"/><name val="Microsoft JhengHei"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF2F6F62"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border/><border><left style="thin"><color rgb="FFE6E1DA"/></left><right style="thin"><color rgb="FFE6E1DA"/></right><top style="thin"><color rgb="FFE6E1DA"/></top><bottom style="thin"><color rgb="FFE6E1DA"/></bottom></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="8"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="14" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"><alignment horizontal="center"/></xf><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment wrapText="1"/></xf><xf numFmtId="10" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"><alignment horizontal="center"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/></cellXfs><dxfs count="${colors.length * 2}">${colors.map((color) => `<dxf><fill><patternFill patternType="solid"><fgColor rgb="FF${color.solid}"/><bgColor rgb="FF${color.solid}"/></patternFill></fill></dxf><dxf><fill><patternFill patternType="solid"><fgColor rgb="FF${color.light}"/><bgColor rgb="FF${color.light}"/></patternFill></fill></dxf>`).join("")}</dxfs></styleSheet>`;
   const files: Record<string, Uint8Array> = {
     "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`),
@@ -65,10 +67,10 @@ function buildImageSvg(tasks: Task[], projectName: string) {
   const patterns = tasks.map((task, index) => `<pattern id="stripe-${index}" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="12" fill="${task.color}"/><rect x="6" width="6" height="12" fill="#fafaf8"/></pattern>`).join("");
   const rows = tasks.map((task, index) => {
     const y = 178 + index * rowHeight; const x = chartLeft + ((parseDate(task.start).getTime() - min) / day / total) * chartWidth; const barWidth = Math.max(16, (((parseDate(task.end).getTime() - parseDate(task.start).getTime()) / day + 1) / total) * chartWidth);
-    const fill = task.barStyle === "stripe" ? `url(#stripe-${index})` : lightenHex(task.color, task.barStyle === "outline" ? .84 : .7);
-    const opacity = 1; const stroke = task.barStyle === "outline" || task.barStyle === "soft" ? task.color : "none"; const textColor = "#111111";
-    const progressWidth = Math.max(0, barWidth * task.progress / 100); const progressFill = progressWidth > 0 ? `<path d="M ${x + 6} ${y + 8} H ${x + progressWidth} V ${y + 42} H ${x + 6} Z" fill="${task.color}"/>` : ""; const badgeX = Math.min(chartLeft + chartWidth - 56, Math.max(x + 4, x + barWidth - 52));
-    return `<text x="44" y="${y + 25}" font-size="20" font-weight="700" fill="#111111">${xml(task.name)}</text><text x="44" y="${y + 48}" font-size="13" fill="#777777">${xml(task.owner)} · ${task.start.slice(5).replace("-", "/")}—${task.end.slice(5).replace("-", "/")}</text><line x1="${chartLeft}" y1="${y + 56}" x2="${chartLeft + chartWidth}" y2="${y + 56}" stroke="#e2e2de" stroke-dasharray="4 5"/>${task.milestone ? `<rect x="${x}" y="${y + 13}" width="22" height="22" rx="3" fill="${task.color}" transform="rotate(45 ${x + 11} ${y + 24})"/><rect x="${x + 30}" y="${y + 10}" width="50" height="26" rx="13" fill="#111111"/><text x="${x + 55}" y="${y + 28}" text-anchor="middle" font-size="12" font-weight="800" fill="#ffffff">${task.progress}%</text>` : `<rect x="${x}" y="${y + 8}" width="${barWidth}" height="34" rx="6" fill="${fill}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="2"/>${progressFill}<text x="${x + 12}" y="${y + 31}" font-size="13" font-weight="700" fill="${textColor}">${barWidth > 180 ? xml(task.name) : ""}</text><rect x="${badgeX}" y="${y + 12}" width="48" height="24" rx="12" fill="#111111"/><text x="${badgeX + 24}" y="${y + 28}" text-anchor="middle" font-size="12" font-weight="800" fill="#ffffff">${task.progress}%</text>`}`;
+    const fill = task.barStyle === "stripe" ? `url(#stripe-${index})` : task.barStyle === "outline" ? "#fafaf8" : task.color;
+    const opacity = task.barStyle === "soft" ? .22 : 1; const stroke = task.barStyle === "outline" || task.barStyle === "soft" ? task.color : "none"; const textColor = task.barStyle === "solid" ? "#ffffff" : "#111111";
+    const progressWidth = Math.max(0, barWidth * task.progress / 100); const badgeX = Math.min(chartLeft + chartWidth - 56, Math.max(x + 4, x + barWidth - 52));
+    return `<text x="44" y="${y + 25}" font-size="20" font-weight="700" fill="#111111">${xml(task.name)}</text><text x="44" y="${y + 48}" font-size="13" fill="#777777">${xml(task.owner)} · ${task.start.slice(5).replace("-", "/")}—${task.end.slice(5).replace("-", "/")}</text><line x1="${chartLeft}" y1="${y + 56}" x2="${chartLeft + chartWidth}" y2="${y + 56}" stroke="#e2e2de" stroke-dasharray="4 5"/>${task.milestone ? `<rect x="${x}" y="${y + 13}" width="22" height="22" rx="3" fill="${task.color}" transform="rotate(45 ${x + 11} ${y + 24})"/><rect x="${x + 30}" y="${y + 10}" width="50" height="26" rx="13" fill="#111111"/><text x="${x + 55}" y="${y + 28}" text-anchor="middle" font-size="12" font-weight="800" fill="#ffffff">${task.progress}%</text>` : `<rect x="${x}" y="${y + 8}" width="${barWidth}" height="34" rx="6" fill="${fill}" fill-opacity="${opacity}" stroke="${stroke}" stroke-width="2"/><rect x="${x}" y="${y + 37}" width="${barWidth}" height="5" rx="2.5" fill="#111111" opacity=".12"/><rect x="${x}" y="${y + 37}" width="${progressWidth}" height="5" rx="2.5" fill="${task.barStyle === "solid" ? "#ffffff" : task.color}"/><text x="${x + 12}" y="${y + 31}" font-size="13" font-weight="700" fill="${textColor}">${barWidth > 180 ? xml(task.name) : ""}</text><rect x="${badgeX}" y="${y + 12}" width="48" height="24" rx="12" fill="#111111"/><text x="${badgeX + 24}" y="${y + 28}" text-anchor="middle" font-size="12" font-weight="800" fill="#ffffff">${task.progress}%</text>`}`;
   }).join("");
   const grid = ticks.map((time) => { const date = new Date(time); const x = chartLeft + ((time - min) / day / total) * chartWidth; return `<line x1="${x}" y1="142" x2="${x}" y2="${height - 42}" stroke="#ddddda"/><text x="${x + 6}" y="126" font-size="13" fill="#777777">${formatDate(date)}</text>`; }).join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-family="Arial Rounded MT Bold,Noto Sans TC,Microsoft JhengHei,sans-serif"><defs>${patterns}</defs><rect width="100%" height="100%" fill="#fafaf8"/><rect x="24" y="24" width="1552" height="${height - 48}" rx="28" fill="#f1f1ee" stroke="#d8d8d4"/><text x="44" y="90" font-size="30" font-weight="800" fill="#111111">${xml(projectName || "未命名專案")}</text><text x="${chartLeft}" y="72" font-size="13" fill="#777777">PROJECT TIMELINE · ${tasks.length} TASKS</text>${grid}${rows}</svg>`;
@@ -89,15 +91,14 @@ export default function Home() {
   const [showExcel, setShowExcel] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
   const [showProjectExport, setShowProjectExport] = useState(false);
+  const [showCreateProject, setShowCreateProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("未命名專案");
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [screen, setScreen] = useState<"projects" | "editor">("projects");
   const [projects, setProjects] = useState<Project[]>(seedProjects);
   const [currentProjectId, setCurrentProjectId] = useState("");
   const [storageReady, setStorageReady] = useState(false);
   const [fileMessage, setFileMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [isProjectFileDragging, setIsProjectFileDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const projectFileDragDepth = useRef(0);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
@@ -151,13 +152,13 @@ export default function Home() {
     setTasks(project.tasks.map((task) => ({ ...task })));
     setScreen("editor");
   };
-  const createProject = () => { const id = `project-${Date.now()}`; const newTasks = [blankTask()]; const project: Project = { id, name: "未命名專案", category: "自訂專案", updated: "剛剛建立", progress: 0, tasks: newTasks }; setProjects((current) => [...current, project]); setCurrentProjectId(id); setProjectName(project.name); setTasks(newTasks); setScreen("editor"); };
+  const openCreateProject = () => { setNewProjectName("未命名專案"); setShowCreateProject(true); };
+  const createProject = () => { const id = `project-${Date.now()}`; const newTasks = [blankTask()]; const name = newProjectName.trim() || "未命名專案"; const project: Project = { id, name, category: "自訂專案", updated: "剛剛建立", progress: 0, tasks: newTasks }; setProjects((current) => [...current, project]); setCurrentProjectId(id); setProjectName(project.name); setTasks(newTasks); setShowCreateProject(false); setScreen("editor"); };
   const deleteProject = (id: string, name: string) => { if (!window.confirm(`確定刪除「${name}」嗎？此操作無法復原。`)) return; setProjects((current) => current.filter((project) => project.id !== id)); };
-  const importProjectFileData = async (file: File) => {
-    if (!file.name.toLowerCase().endsWith(".json") && file.type !== "application/json") {
-      setFileMessage({ type: "error", text: "請匯入 gantt!lab 匯出的 .gantt.json 專案檔。" });
-      return;
-    }
+  const importProjectFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
     try {
       const imported = parseProjectFile(await file.text());
       setProjects((current) => [...current, ...imported]);
@@ -165,35 +166,6 @@ export default function Home() {
     } catch (error) {
       setFileMessage({ type: "error", text: error instanceof Error ? error.message : "專案檔匯入失敗。" });
     }
-  };
-  const importProjectFile = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (file) void importProjectFileData(file);
-  };
-  const openProjectFilePicker = () => fileInputRef.current?.click();
-  const handleProjectFileDragEnter = (event: DragEvent<HTMLElement>) => {
-    if (!event.dataTransfer.types.includes("Files")) return;
-    event.preventDefault();
-    projectFileDragDepth.current += 1;
-    setIsProjectFileDragging(true);
-  };
-  const handleProjectFileDragLeave = (event: DragEvent<HTMLElement>) => {
-    if (!event.dataTransfer.types.includes("Files")) return;
-    projectFileDragDepth.current = Math.max(0, projectFileDragDepth.current - 1);
-    if (projectFileDragDepth.current === 0) setIsProjectFileDragging(false);
-  };
-  const handleProjectFileDragOver = (event: DragEvent<HTMLElement>) => {
-    if (!event.dataTransfer.types.includes("Files")) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-  };
-  const handleProjectFileDrop = (event: DragEvent<HTMLElement>) => {
-    event.preventDefault();
-    projectFileDragDepth.current = 0;
-    setIsProjectFileDragging(false);
-    const file = event.dataTransfer.files?.[0];
-    if (file) void importProjectFileData(file);
   };
   const openSelectiveExport = () => { setSelectedProjectIds([]); setShowProjectExport(true); };
   const toggleProjectSelection = (id: string) => setSelectedProjectIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
@@ -203,11 +175,11 @@ export default function Home() {
   const exportCurrentProject = () => downloadProjectFile([{ id: currentProjectId || `project-${Date.now()}`, name: projectName, category: "自訂專案", updated: "匯出時版本", progress: Math.round(tasks.reduce((sum, task) => sum + task.progress, 0) / Math.max(1, tasks.length)), tasks: tasks.map((task) => ({ ...task })) }], projectName);
   if (screen === "projects") return <main>
     <header className="topbar"><div className="brand"><span>gantt</span><b>!</b><span>lab</span></div></header>
-    <section className={`project-hub ${isProjectFileDragging ? "dragging-project-file" : ""}`} onDragEnter={handleProjectFileDragEnter} onDragLeave={handleProjectFileDragLeave} onDragOver={handleProjectFileDragOver} onDrop={handleProjectFileDrop}>
-      <div className="hub-head"><div><small>PROJECTS</small><h1>我的專案</h1><p>可自動儲存，也能用專案檔備份或移到其他裝置。</p></div><div className="hub-actions"><input ref={fileInputRef} className="project-file-input" type="file" accept=".gantt.json,.json,application/json" onChange={importProjectFile}/><button className="import-project" onClick={openProjectFilePicker}>↓ 匯入專案檔</button><button className="backup-projects" onClick={openSelectiveExport} disabled={!projects.length}>↑ 選擇匯出</button><button className="new-project" onClick={createProject}>＋ 新增專案</button></div></div>
+    <section className="project-hub">
+      <div className="hub-head"><div><small>PROJECTS</small><h1>我的專案</h1><p>可自動儲存，也能用專案檔備份或移到其他裝置。</p></div><div className="hub-actions"><label className="import-project">↓ 匯入專案檔<input type="file" accept=".json,application/json" onChange={importProjectFile}/></label><button className="backup-projects" onClick={openSelectiveExport} disabled={!projects.length}>↑ 選擇匯出</button><button className="new-project" onClick={openCreateProject}>＋ 新增專案</button></div></div>
       {fileMessage && <div className={`file-message ${fileMessage.type}`} role="status"><span>{fileMessage.type === "success" ? "✓" : "!"}</span>{fileMessage.text}<button onClick={() => setFileMessage(null)} aria-label="關閉訊息">×</button></div>}
-      {projects.length === 0 ? <div className="empty-projects"><div>＋</div><h2>還沒有專案</h2><p>建立空白專案，或直接拖放專案檔到這裡匯入。</p><button onClick={createProject}>建立第一個專案</button></div> : <div className="project-grid">{projects.map((project, index) => <article className="project-card" key={project.id}><button className="project-open" onClick={() => openProject(project)}><div className="project-card-top"><span>{String(index + 1).padStart(2, "0")}</span><i>↗</i></div><div><em>{project.category}</em><h2>{project.name}</h2></div><div className="project-progress"><span><i style={{ width: `${project.progress}%` }}/></span><b>{project.progress}%</b></div><footer><span>{project.tasks.length} 個任務</span><span>{project.updated}</span></footer></button><button className="delete-project" onClick={() => deleteProject(project.id, project.name)}>刪除專案</button></article>)}</div>}
-      {isProjectFileDragging && <div className="project-file-drop-overlay" aria-live="polite"><strong>拖放專案檔到這裡匯入</strong><span>支援 .gantt.json</span></div>}
+      {projects.length === 0 ? <div className="empty-projects"><div>＋</div><h2>還沒有專案</h2><p>建立空白專案，或匯入先前下載的專案檔。</p><button onClick={openCreateProject}>建立第一個專案</button></div> : <div className="project-grid">{projects.map((project, index) => <article className="project-card" key={project.id}><button className="project-open" onClick={() => openProject(project)}><div className="project-card-top"><span>{String(index + 1).padStart(2, "0")}</span><i>↗</i></div><div><em>{project.category}</em><h2>{project.name}</h2></div><div className="project-progress"><span><i style={{ width: `${project.progress}%` }}/></span><b>{project.progress}%</b></div><footer><span>{project.tasks.length} 個任務</span><span>{project.updated}</span></footer></button><button className="delete-project" onClick={() => deleteProject(project.id, project.name)}>刪除專案</button></article>)}</div>}
+    {showCreateProject && <div className="modal-backdrop" onMouseDown={() => setShowCreateProject(false)}><section className="create-project-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="新增專案"><header><div><small>NEW PROJECT</small><h2>建立新專案</h2><p>先設定專案名稱，再進入甘特圖編輯。</p></div><button onClick={() => setShowCreateProject(false)} aria-label="關閉新增專案">×</button></header><div className="create-project-body"><label>專案名稱<input autoFocus value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") createProject(); }} placeholder="例如：年度活動企劃"/></label><div className="create-project-preview"><span>PROJECT</span><strong>{newProjectName.trim() || "未命名專案"}</strong><small>建立後會先產生一個空白任務</small></div></div><footer><button className="secondary" onClick={() => setShowCreateProject(false)}>取消</button><button className="primary" onClick={createProject}>建立並進入編輯</button></footer></section></div>}
     </section>
     {showProjectExport && <div className="modal-backdrop" onMouseDown={() => setShowProjectExport(false)}><section className="project-export-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="選擇匯出專案"><header><div><small>PROJECT FILE</small><h2>選擇要匯出的專案</h2><p>可勾選一個或多個專案，下載成同一個專案檔。</p></div><button onClick={() => setShowProjectExport(false)} aria-label="關閉選擇匯出">×</button></header><div className="export-select-tools"><button onClick={toggleAllProjects}>{allProjectsSelected ? "取消全選" : "全選"}</button><span>已選擇 <b>{selectedProjectIds.length}</b>／{projects.length} 個</span></div><div className="export-project-list">{projects.map((project) => <label className={selectedProjectIds.includes(project.id) ? "selected" : ""} key={project.id}><input type="checkbox" checked={selectedProjectIds.includes(project.id)} onChange={() => toggleProjectSelection(project.id)}/><span><b>{project.name}</b><small>{project.tasks.length} 個任務 · {project.updated}</small></span><em>{project.progress}%</em></label>)}</div><footer><button className="secondary" onClick={() => setShowProjectExport(false)}>取消</button><button className="primary" disabled={!selectedProjectIds.length} onClick={exportSelectedProjects}>下載 {selectedProjectIds.length ? `${selectedProjectIds.length} 個` : "所選"}專案</button></footer></section></div>}
   </main>;

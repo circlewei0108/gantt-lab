@@ -69,4 +69,3 @@ test("操作頁更新只寫回目前專案並重新計算整體進度", () => {
   assert.deepEqual(updated[0].tasks.map((task) => task.id), [10, 11]);
   assert.equal(updated[1], other);
 });
-

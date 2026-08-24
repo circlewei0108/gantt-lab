@@ -16,4 +16,3 @@ export function excelDateSerial(value: string) {
   const [year, month, day] = value.split("-").map(Number);
   return Math.floor((Date.UTC(year, month - 1, day) - Date.UTC(1899, 11, 30)) / 86400000);
 }
-
